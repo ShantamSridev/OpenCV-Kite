@@ -1,129 +1,74 @@
 import cv2
+
 import numpy as np
+
 import requests
-import serial
-import re
-import time
 
-# --- CONFIG ---
-URL       = "http://192.168.4.1"
-STREAM    = URL + ":81/stream"
-SERIAL_PORT = 'COM6'         # change to your port, e.g. '/dev/ttyUSB0'
-BAUDRATE  = 115200
-TIMEOUT   = 0.1              # seconds
-# --------------
+# URL of the video stream
+#url = 'http://192.168.4.1:81/stream'
+# ESP32 URL
+URL = "http://192.168.4.1"
+AWB = True
 
-# Open video stream
-cap = cv2.VideoCapture(STREAM)
+# Create a VideoCapture object with the URL
+cap = cv2.VideoCapture(URL + ":81/stream")
+
+# Check if the video stream is opened successfully
 if not cap.isOpened():
     print("Error: Could not open video stream.")
     exit()
 
-# Open serial port
-try:
-    ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=TIMEOUT)
-    time.sleep(2)  # give it a moment
-except Exception as e:
-    print(f"Error opening serial port: {e}")
-    ser = None
+def set_resolution(url: str, index: int=1, verbose: bool=False):
+    try:
+        if verbose:
+            resolutions = "10: UXGA(1600x1200)\n9: SXGA(1280x1024)\n8: XGA(1024x768)\n7: SVGA(800x600)\n6: VGA(640x480)\n5: CIF(400x296)\n4: QVGA(320x240)\n3: HQVGA(240x176)\n0: QQVGA(160x120)"
+            print("available resolutions\n{}".format(resolutions))
 
-# Simple regex to grab numbers
-line_re = re.compile(
-    r'Pitch:\s*([-+]?\d*\.?\d+),\s*'
-    r'Roll:\s*([-+]?\d*\.?\d+),\s*'
-    r'Yaw:\s*([-+]?\d*\.?\d+),\s*'
-    r'Temp:\s*([-+]?\d*\.?\d+),\s*'
-    r'Alt:\s*([-+]?\d*\.?\d+),\s*'
-    r'Battery:\s*([-+]?\d*\.?\d+)'
-)
+        if index in [10, 9, 8, 7, 6, 5, 4, 3, 0]:
+            requests.get(url + "/control?var=framesize&val={}".format(index))
+        else:
+            print("Wrong index")
+    except:
+        print("SET_RESOLUTION: something went wrong")
 
-def read_hud():
-    """Read one line from serial and parse into tuple of floats.
-       Returns None on failure."""
-    if ser is None:
-        return None
-    raw = ser.readline().decode(errors='ignore').strip()
-    m = line_re.match(raw)
-    if not m:
-        return None
-    return tuple(float(m.group(i)) for i in range(1,7))
+def set_quality(url: str, value: int=1, verbose: bool=False):
+    try:
+        if value >= 10 and value <=63:
+            requests.get(url + "/control?var=quality&val={}".format(value))
+    except:
+        print("SET_QUALITY: something went wrong")
 
-def draw_hud(frame, data):
-    """Overlay the HUD data onto the frame."""
-    if data is None:
-        return frame
-    pitch, roll, yaw, temp, alt, batt = data
-
-    # Prepare text lines
-    lines = [
-        f"Pitch:   {pitch:6.2f}",
-        f"Roll:    {roll:6.2f}",
-        f"Yaw:     {yaw:6.2f}",
-        f"Temp:    {temp:6.2f} °C",
-        f"Alt:     {alt:6.2f} m",
-        f"Battery: {batt:4.2f} V",
-    ]
-
-    # Parameters
-    margin  = 10
-    line_h  = 20  # approx text height
-    font    = cv2.FONT_HERSHEY_SIMPLEX
-    scale   = 0.6
-    color   = (0, 255, 0)
-    thickness = 1
-    alpha   = 0.4  # transparency for background
-
-    # Calculate background rectangle size
-    box_width  = 200
-    box_height = line_h * len(lines) + margin*2
-    overlay = frame.copy()
-    cv2.rectangle(
-        overlay,
-        (margin, margin),
-        (margin + box_width, margin + box_height),
-        (0,0,0),
-        -1
-    )
-    # blend with original
-    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-
-    # Draw each line of text
-    for i, text in enumerate(lines):
-        y = margin + (i+1)*line_h
-        cv2.putText(
-            frame,
-            text,
-            (margin + 5, y),
-            font,
-            scale,
-            color,
-            thickness,
-            cv2.LINE_AA
-        )
-    return frame
+def set_awb(url: str, awb: int=1):
+    try:
+        awb = not awb
+        requests.get(url + "/control?var=awb&val={}".format(1 if awb else 0))
+    except:
+        print("SET_QUALITY: something went wrong")
+    return awb
 
 if __name__ == '__main__':
-    # Optionally set resolution once
-    # requests.get(URL + "/control?var=framesize&val=10")
-
+    set_resolution(URL, index=10)
     while True:
         ret, frame = cap.read()
         if not ret:
             print("Failed to grab frame.")
             break
 
-        # Read and overlay HUD data
-        hud_data = read_hud()
-        frame = draw_hud(frame, hud_data)
+        # Display the frame
+        cv2.imshow('IP Camera Stream', frame)
 
-        cv2.imshow('IP Camera Stream with HUD', frame)
-        key = cv2.waitKey(1) & 0xFF
+        key = cv2.waitKey(1)
 
-        if key == ord('q'):
+        if key == ord('r'):
+            idx = int(input("Select resolution index: "))
+            set_resolution(URL, index=idx, verbose=True)
+
+        elif key == ord('q'):
             break
-        # (you can re‑use your existing 'r' and 'a' handlers here)
 
+        elif key == ord('a'):
+            AWB = set_awb(URL, AWB)
+
+    # Release the capture and close any open windows
     cap.release()
-    if ser:
-        ser.close()
     cv2.destroyAllWindows()
