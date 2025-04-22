@@ -4,6 +4,7 @@ import requests
 import serial
 import threading
 import math
+from inclinometer import draw_inclinometer
 
 # ————— CONFIG —————
 ESP32_URL     = "http://192.168.4.1"
@@ -42,45 +43,7 @@ def serial_reader():
 t = threading.Thread(target=serial_reader, daemon=True)
 t.start()
 
-# ——— draw inclinometer in-place ———
-def draw_inclinometer(roll_deg, pitch_deg, W, H):
-    img = np.zeros((H, W, 3), dtype=np.uint8)
-    cx, cy = W // 2, H // 2
-    radius = min(cx, cy) - 5
 
-    # horizon offset and tilt
-    y_off = int((pitch_deg / 90.0) * radius)
-    theta = math.radians(-roll_deg)
-    c, s = math.cos(theta), math.sin(theta)
-
-    # coordinate grid
-    ys, xs = np.indices((H, W))
-    dx = xs - cx
-    dy = ys - cy
-
-    # rotated grid for horizon test
-    xr = dx * c + (dy + y_off) * s
-    yr = -dx * s + (dy + y_off) * c
-
-    # mask inside circle
-    circle_mask = (dx**2 + dy**2) <= radius**2
-
-    # sky/ground masks
-    top_mask  = (yr < 0) & circle_mask
-    bot_mask  = (yr >= 0) & circle_mask
-    img[top_mask] = (255, 0, 0)
-    img[bot_mask] = (0, 0, 255)
-
-    # draw fixed circle & crosshair
-    cv2.circle(img, (cx, cy), radius, (255,255,255), 2)
-    cv2.line(img, (cx-radius, cy), (cx+radius, cy), (255,255,255), 1)
-    cv2.line(img, (cx, cy-radius), (cx, cy+radius), (255,255,255), 1)
-
-    # labels
-    cv2.putText(img, f"Roll: {roll_deg:.1f}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-    cv2.putText(img, f"Pitch: {pitch_deg:.1f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-
-    return img
 
 # ——— camera controls ———
 def set_resolution(idx):
