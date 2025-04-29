@@ -4,6 +4,9 @@ import requests
 import serial
 import threading
 import math
+import time
+import csv
+from datetime import datetime
 from inclinometer import draw_inclinometer
 
 # ————— CONFIG —————
@@ -11,13 +14,22 @@ ESP32_URL     = "http://192.168.4.1"
 VIDEO_BACKEND = cv2.CAP_FFMPEG    # or cv2.CAP_GSTREAMER
 SIDEBAR_FRAC  = 1/3               # sidebar width fraction
 INCL_H_FRAC   = 0.4               # inclinometer height fraction
-SERIAL_PORT   = "COM6"           # or "/dev/ttyUSB0"
+SERIAL_PORT   = "COM6"            # or "/dev/ttyUSB0"
 BAUDRATE      = 115200
+LOG_INTERVAL  = 0.5               # seconds between logs
 
 # ——— shared state ———
 telemetry = {"Pitch":0.0, "Roll":0.0, "Yaw":0.0,
              "Temp":0.0, "Alt":0.0, "Battery":0.0}
 lock = threading.Lock()
+
+# ——— logging setup ———
+start_time = time.time()
+timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+logfile = open(f"logs/log_{timestamp_str}.csv", "w", newline="")
+csv_writer = csv.writer(logfile)
+csv_writer.writerow(["Timestamp", "Runtime (s)", "Pitch", "Roll", "Yaw", "Temp", "Alt", "Battery"])
+last_log_time = start_time
 
 # ——— serial reader thread ———
 def serial_reader():
@@ -42,8 +54,6 @@ def serial_reader():
 
 t = threading.Thread(target=serial_reader, daemon=True)
 t.start()
-
-
 
 # ——— camera controls ———
 def set_resolution(idx):
@@ -97,6 +107,26 @@ if __name__ == "__main__":
         bot = np.hstack((blank, inc_img))
         comp = np.vstack((top, bot))
 
+        # ——— telemetry logging every 0.5s ———
+        now_time = time.time()
+        if now_time - last_log_time >= LOG_INTERVAL:
+            with lock:
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                runtime = now_time - start_time
+                csv_writer.writerow([
+                    now,
+                    f"{runtime:.2f}",
+                    telemetry["Pitch"],
+                    telemetry["Roll"],
+                    telemetry["Yaw"],
+                    telemetry["Temp"],
+                    telemetry["Alt"],
+                    telemetry["Battery"]
+                ])
+                logfile.flush()
+            last_log_time = now_time
+
+        # show
         cv2.imshow("Camera + Telemetry + Inclinometer", comp)
         key = cv2.waitKey(1) & 0xFF
         if key == ord('r'):
@@ -108,4 +138,5 @@ if __name__ == "__main__":
             break
 
     cap.release()
+    logfile.close()
     cv2.destroyAllWindows()
